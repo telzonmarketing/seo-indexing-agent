@@ -1,0 +1,71 @@
+name: SEO Indexing Agent
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # Run daily at 8am UTC
+  push:
+    branches: [main]       # Also run on every deploy
+  workflow_dispatch:       # Allow manual trigger from GitHub UI
+
+jobs:
+  seo-audit:
+    name: Audit & Submit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run SEO audit & submit
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+          GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+          MAX_CRAWL_PAGES: 1000
+          AUTO_SUBMIT: true
+        run: node src/index.js run --url $SITE_URL
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: seo-report-${{ github.run_number }}
+          path: |
+            full-report.json
+            report.html
+          retention-days: 30
+
+      - name: Comment on commit if issues found
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const report = JSON.parse(fs.readFileSync('full-report.json', 'utf8'));
+              const { critical, important, pagesFound, issuesFound } = report.summary;
+              if (critical > 0 || important > 0) {
+                github.rest.repos.createCommitComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  commit_sha: context.sha,
+                  body: [
+                    '## SEO Indexing Agent Report',
+                    `**Pages crawled:** ${pagesFound} | **Issues found:** ${issuesFound}`,
+                    critical > 0 ? `**Critical:** ${critical} (fix immediately)` : '',
+                    important > 0 ? `**Important:** ${important}` : '',
+                    '',
+                    'Check the workflow artifacts for the full report.',
+                  ].filter(Boolean).join('\n')
+                });
+              }
+            } catch (_) {}

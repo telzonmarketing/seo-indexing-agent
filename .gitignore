@@ -1,0 +1,12 @@
+node_modules/
+.env
+config/service-account.json
+config/clients/*.json
+config/clients.json
+reports/
+*.log
+report.json
+full-report.json
+report.html
+.DS_Store
+.claude/
