@@ -1,4 +1,4 @@
-.PHONY: help up down dev backend frontend worker setup-ollama db-reset logs
+.PHONY: help up down dev backend frontend worker setup-ollama db-reset logs prod-up prod-down prod-logs prod-update deploy-vps
 
 help:
 	@echo ""
@@ -84,3 +84,41 @@ db-reset:
 	docker compose exec postgres psql -U seo -c "DROP DATABASE IF EXISTS seoos;"
 	docker compose exec postgres psql -U seo -c "CREATE DATABASE seoos;"
 	@echo "✓ Database reset"
+
+# ── Production (Hostinger VPS) ────────────────────────────────────────────────
+
+prod-up:
+	docker compose -f docker-compose.production.yml up -d
+
+prod-down:
+	docker compose -f docker-compose.production.yml down
+
+prod-logs:
+	docker compose -f docker-compose.production.yml logs -f
+
+prod-update:
+	git pull
+	docker compose -f docker-compose.production.yml build
+	docker compose -f docker-compose.production.yml up -d --remove-orphans
+
+prod-ps:
+	docker compose -f docker-compose.production.yml ps
+
+prod-backup:
+	docker compose -f docker-compose.production.yml exec postgres \
+		pg_dump -U seo seoos > backup_$(shell date +%Y%m%d_%H%M).sql
+	@echo "✓ Backup saved"
+
+# Push code to VPS (run on your Mac)
+# Usage: make deploy-vps VPS=root@YOUR_IP
+deploy-vps:
+	@[ -n "$(VPS)" ] || (echo "Usage: make deploy-vps VPS=root@YOUR_IP" && exit 1)
+	rsync -avz --progress \
+		--exclude node_modules \
+		--exclude .next \
+		--exclude __pycache__ \
+		--exclude '*.pyc' \
+		--exclude .git \
+		--exclude reports \
+		. $(VPS):/opt/seoos/
+	ssh $(VPS) "cd /opt/seoos && bash deploy/deploy.sh"

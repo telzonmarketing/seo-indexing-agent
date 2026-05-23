@@ -1,6 +1,8 @@
 import axios from "axios";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// In production with Nginx, NEXT_PUBLIC_API_URL is empty → uses relative /api path
+// In development, falls back to localhost:8000
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || (typeof window !== "undefined" ? "" : "http://localhost:8000");
 
 export const api = axios.create({
   baseURL: `${API_BASE}/api`,
