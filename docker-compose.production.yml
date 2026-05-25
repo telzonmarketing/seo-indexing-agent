@@ -36,7 +36,15 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # AOF persistence: survives restarts, saves every second
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --save 900 1
+      --save 300 10
     expose:
       - "6379"
     volumes:
@@ -84,8 +92,11 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       QDRANT_HOST: qdrant
       OLLAMA_HOST: http://host.docker.internal:11434   # Ollama runs on host
+      SEO_OS_DATA_DIR: /data/seo-os
     extra_hosts:
       - "host.docker.internal:host-gateway"            # required for Ollama on host
+    volumes:
+      - seoos_data:/data/seo-os
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,6 +108,7 @@ services:
       --port 8000
       --workers 2
       --timeout-keep-alive 30
+    mem_limit: 512m
     logging:
       driver: "json-file"
       options:
@@ -130,6 +142,10 @@ services:
       --loglevel=info
       --concurrency=2
       --max-tasks-per-child=100
+      -Q celery,crawl,ai,brain,default
+      --without-gossip
+      --without-mingle
+    mem_limit: 512m
     logging:
       driver: "json-file"
       options:
@@ -152,6 +168,9 @@ services:
     command: >
       celery -A app.tasks.celery_app.celery beat
       --loglevel=info
+      --schedule /var/celery/celerybeat-schedule
+    volumes:
+      - celery_beat_data:/var/celery
     logging:
       driver: "json-file"
       options:
@@ -167,17 +186,24 @@ services:
     ports:
       - "127.0.0.1:3000:3000"      # only localhost — Nginx proxies externally
     environment:
-      NEXT_PUBLIC_API_URL: ""       # empty = use relative /api (via Nginx)
+      NEXT_PUBLIC_API_URL: ""       # empty → client uses relative /api (Nginx routes it)
+      NEXT_INTERNAL_API_URL: "http://api:8000"  # SSR → Docker service name
+      DISABLE_REWRITES: "1"         # Nginx handles /api/*, no Next.js rewrite needed
       NODE_ENV: production
     depends_on:
       - api
+    mem_limit: 256m
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
+  # ── API resource limits ───────────────────────────────────────────
+  # Applied inline above; declare mem_limit on api too
 volumes:
   postgres_data:
   redis_data:
   qdrant_data:
+  celery_beat_data:      # persists beat schedule across restarts
+  seoos_data:            # client files, reports, exports

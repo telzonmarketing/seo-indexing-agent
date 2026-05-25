@@ -15,10 +15,11 @@ export default function ClientsPage() {
   const [search, setSearch] = useState("");
   const qc = useQueryClient();
 
-  const { data: clients = [], isLoading } = useQuery({
+  const { data: clientsData, isLoading } = useQuery({
     queryKey: ["clients", search],
     queryFn: () => clientsApi.list(search || undefined).then((r) => r.data),
   });
+  const clients = clientsData?.clients ?? clientsData ?? [];
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => clientsApi.delete(id),
@@ -33,7 +34,7 @@ export default function ClientsPage() {
     <div className="flex flex-col h-full">
       <Header
         title="Clients"
-        description={`${clients.length} active clients`}
+        description={`${clientsData?.total ?? clients.length} active clients`}
         actions={
           <Link href="/clients/new">
             <Button size="sm">

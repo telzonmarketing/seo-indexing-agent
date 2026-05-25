@@ -1,0 +1,33 @@
+# Dependencies — reinstalled inside image
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output — rebuilt inside image
+.next
+out
+
+# Secrets
+.env
+.env.*
+!.env.example
+!.env.local.example
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests
+coverage
+*.test.ts
+*.spec.ts

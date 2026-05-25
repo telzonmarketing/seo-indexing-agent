@@ -42,6 +42,21 @@ class Settings(BaseSettings):
     # Optional OpenAI fallback
     OPENAI_API_KEY: str = ""
 
+    # Slack webhook for alerts (optional)
+    SLACK_WEBHOOK_URL: str = ""
+
+    # Client workspace data directory
+    SEO_OS_DATA_DIR: str = "/tmp/seo-os"
+
+    # Domain config (used for building absolute URLs in reports)
+    ADMIN_DOMAIN: str = "admin.telzonmarketing.in"
+    API_DOMAIN: str = "api.telzonmarketing.in"
+    MISSION_CONTROL_DOMAIN: str = "missioncontrol.telzonmarketing.in"
+
+    # Monitoring
+    PROMETHEUS_SCRAPE_TOKEN: str = ""  # leave empty to allow unauthenticated scraping
+    LOG_LEVEL: str = "info"
+
     class Config:
         env_file = ".env"
         case_sensitive = True

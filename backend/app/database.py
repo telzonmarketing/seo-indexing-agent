@@ -30,5 +30,14 @@ async def get_db():
 
 
 async def init_db():
+    # Import all models so Base.metadata knows about them
+    from app.models import (  # noqa: F401
+        Client, Website, Integration, Crawl, Page, SEOIssue,
+        Task, Report, User, KeywordRanking,
+        BlogIdea, BacklinkOpportunity, ContentCluster, Alert,
+        SEOArticle, SEOKnowledgeEntry, BrainLearningSession, SEOBrainState,
+        AIActivity,
+    )
+    from app.models.automation_rule import AutomationRule, RuleExecution  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 from typing import Optional
@@ -13,6 +13,49 @@ from app.core.deps import get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/crawls", tags=["crawls"])
+
+
+@router.get("")
+async def list_crawls(
+    website_id: Optional[str] = None,
+    status: Optional[str] = None,
+    limit: int = 30,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """List all crawls — optionally filtered by website or status."""
+    query = select(Crawl).order_by(Crawl.created_at.desc())
+    if website_id:
+        query = query.where(Crawl.website_id == website_id)
+    if status:
+        query = query.where(Crawl.status == status)
+
+    total = await db.scalar(
+        select(func.count(Crawl.id))
+        .where(Crawl.website_id == website_id if website_id else True)
+        .where(Crawl.status == status if status else True)
+    ) or 0
+
+    result = await db.execute(query.offset(offset).limit(limit))
+    crawls = result.scalars().all()
+
+    # Enrich with website domain
+    website_map = {}
+    wids = list({str(c.website_id) for c in crawls})
+    if wids:
+        ws_result = await db.execute(select(Website).where(Website.id.in_(wids)))
+        website_map = {str(w.id): w.domain for w in ws_result.scalars().all()}
+
+    return {
+        "crawls": [
+            {**_serialize_crawl(c), "website_domain": website_map.get(str(c.website_id), "")}
+            for c in crawls
+        ],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+    }
 
 
 class CrawlStart(BaseModel):
@@ -115,6 +158,77 @@ async def get_website_crawls(
     return [_serialize_crawl(c) for c in result.scalars().all()]
 
 
+@router.post("/{crawl_id}/cancel")
+async def cancel_crawl(
+    crawl_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Cancel a running or pending crawl."""
+    crawl = await db.get(Crawl, crawl_id)
+    if not crawl:
+        raise HTTPException(status_code=404, detail="Crawl not found")
+    if crawl.status not in (CrawlStatus.running, CrawlStatus.pending):
+        return {"success": False, "message": f"Crawl already {crawl.status}"}
+
+    # Revoke Celery task if tracked
+    if crawl.celery_task_id:
+        try:
+            from app.tasks.celery_app import celery
+            celery.control.revoke(crawl.celery_task_id, terminate=True)
+        except Exception:
+            pass
+
+    crawl.status = CrawlStatus.failed
+    crawl.error_message = "Cancelled by user"
+    crawl.completed_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"success": True, "crawl_id": crawl_id, "status": "cancelled"}
+
+
+@router.get("/stats/overview")
+async def crawl_stats(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
+    """Quick stats: total, running, completed today, failed."""
+    from datetime import timedelta
+    from sqlalchemy import case
+    now = datetime.now(timezone.utc)
+    since_24h = now - timedelta(hours=24)
+
+    total = await db.scalar(select(func.count(Crawl.id))) or 0
+    running = await db.scalar(select(func.count(Crawl.id)).where(Crawl.status == CrawlStatus.running)) or 0
+    completed_24h = await db.scalar(
+        select(func.count(Crawl.id))
+        .where(Crawl.status == CrawlStatus.completed, Crawl.completed_at >= since_24h)
+    ) or 0
+    failed_24h = await db.scalar(
+        select(func.count(Crawl.id))
+        .where(Crawl.status == CrawlStatus.failed, Crawl.created_at >= since_24h)
+    ) or 0
+
+    return {
+        "total": total,
+        "running": running,
+        "completed_24h": completed_24h,
+        "failed_24h": failed_24h,
+    }
+
+
+def _get_issues_safe(crawl: Crawl) -> list:
+    """Return issues only if they were eagerly loaded — avoids MissingGreenlet in list views."""
+    from sqlalchemy.orm.base import instance_state
+    from sqlalchemy.orm import RelationshipProperty
+    try:
+        state = instance_state(crawl)
+        if "issues" in state.dict:
+            return [_serialize_issue(i) for i in (crawl.issues or [])]
+    except Exception:
+        pass
+    return []
+
+
 def _serialize_crawl(crawl: Crawl) -> dict:
     return {
         "id": str(crawl.id),
@@ -129,7 +243,7 @@ def _serialize_crawl(crawl: Crawl) -> dict:
         "started_at": crawl.started_at.isoformat() if crawl.started_at else None,
         "completed_at": crawl.completed_at.isoformat() if crawl.completed_at else None,
         "created_at": crawl.created_at.isoformat() if crawl.created_at else None,
-        "issues": [_serialize_issue(i) for i in (crawl.issues or [])] if hasattr(crawl, "issues") else [],
+        "issues": _get_issues_safe(crawl),
     }
 
 
